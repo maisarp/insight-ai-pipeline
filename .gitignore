@@ -1,3 +1,21 @@
+**.env
+**.xlsx
+data/
+model/
+.github/prompts/**
+**.venv
+prompts_docs/
+**.vscode
+pyproject.toml
+.internal_mapping.json
+reports/converted
+build/
+dist/
+__pycache__/
+scripts/train_clustering_unemployed.py
+presentation_talking_points.md
+__init__.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
