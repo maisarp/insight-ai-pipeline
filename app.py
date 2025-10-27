@@ -190,7 +190,7 @@ def run_console_flow() -> None:
 
     if converted:
         console.print(
-            "\n✓ Criamos uma cópia em CSV para facilitar a análise:",
+            "\n✓ Criamos uma cópia em CSV no seu computador para facilitar a análise:",
             style="success",
         )
         console.print(f"  {prepared_path}", style="info")
@@ -201,15 +201,16 @@ def run_console_flow() -> None:
         )
 
     console.print(
-        "\nAs próximas informações ajudam apenas na organização dos relatórios gerados no seu computador."
-        " Nenhum dado é enviado para outros sistemas.",
+        "\nAs próximas informações ajudam apenas na criação do relátorio no seu computador.\n"
+        "Nenhum dado é enviado para outros sistemas. O relatório completo será salvo localmente.\n\n",
+        "==================================================================================\n\n",
         style="info",
     )
 
     identifier_columns = detect_identifier_columns(prepared_path)
     if identifier_columns:
         console.print(
-            f"Colunas identificadoras detectadas: {', '.join(identifier_columns)}",
+            f"Coluna(s) identificadora(s) detectada(s): {', '.join(identifier_columns)}",
             style="highlight",
         )
     else:
@@ -219,11 +220,26 @@ def run_console_flow() -> None:
         )
         identifier_columns = [IDENTIFIER_PRIORITY[0]]
 
-    predictor = PredictorClustering(str(MODEL_PATH), str(SCALER_PATH), identifier_columns)
-    predictor.load_and_process_data(str(prepared_path)).predict()
+    predictor = PredictorClustering(
+        str(MODEL_PATH),
+        str(SCALER_PATH),
+        identifier_columns,
+        verbose=False, #IMPORTANTE LEMBRAR: MANTER DESATIVADO PARA CRIAR O .EXE
+    )
+
+    with console.status("[info]Estamos preparando os dados para análise..."):
+        predictor.load_and_process_data(str(prepared_path))
+
+    with console.status("[info]Estamos gerando as classificações individuais..."):
+        predictor.predict()
+
+    console.print(
+        "\n✓ Análise concluída. Vamos revisar os pontos principais:",
+        style="success",
+    )
 
     insight_service = ClusterInsightService(TRAINING_REPORT_PATH)
-    user_output_dir = prepared_path.parent / "ia_analise_relatorio"
+    user_output_dir = prepared_path.parent / "IA_insights_arquivos"
     report_builder = ClusterReportBuilder(insight_service, user_output_dir)
 
     report_builder.print_overview(predictor)
@@ -234,13 +250,13 @@ def run_console_flow() -> None:
     report_builder.print_individual_overview(predictor, fallback_identifiers)
 
     saved_files = report_builder.save_outputs(predictor)
-    console.print("Arquivos gerados no seu computador:", style="title")
+    console.print("Relatórios gerados no seu computador:", style="title")
     for generated in saved_files:
         console.print(f"- {generated.resolve()}", style="info")
 
     console.print(
-        f"\nVocê encontra todos os arquivos em: {user_output_dir.resolve()}",
-        style="success",
+        f"\nVocê encontra todos os arquivos gerados na pasta: {user_output_dir.resolve()}",
+        style="title",
     )
 
     if converted and prepared_path.exists():
@@ -257,16 +273,23 @@ def run_console_flow() -> None:
 
 def main() -> None:
     """Ponto de entrada principal com tratamento de exceções."""
+    exit_code = 0
     try:
         print_header()
         run_console_flow()
     except KeyboardInterrupt:
         console.print("\nOperação interrompida pelo usuário.", style="warning")
-        sys.exit(0)
     except Exception as exc:
         console.print("\nErro inesperado durante a execução:", style="error")
         console.print(str(exc), style="error")
-        sys.exit(1)
+        exit_code = 1
+    finally:
+        try:
+            console.input("[prompt]Pressione Enter para encerrar ou feche a janela.")
+        except (EOFError, KeyboardInterrupt):
+            pass
+
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

@@ -69,7 +69,7 @@ class DataProcessorClustering:
         'ensino superior': 3
     }
     
-    def __init__(self, file_path: str):
+    def __init__(self, file_path: str, verbose: bool = True):
         """
         Inicializa o processador.
         
@@ -82,6 +82,7 @@ class DataProcessorClustering:
         self.scaler = StandardScaler()
         self.feature_names = []
         self.missing_columns = []
+        self.verbose = verbose
         
         # Peso reduzido para a variável de dependência química
         self.feature_weights = {
@@ -97,6 +98,11 @@ class DataProcessorClustering:
             'marital_status_married': 1.0,
             'income': 1.0
         }
+
+    def _print(self, message: str, force: bool = False) -> None:
+        """Exibe mensagens condicionadas à configuração de verbosidade."""
+        if self.verbose or force:
+            print(message)
     
     def load_data(self) -> 'DataProcessorClustering':
         """
@@ -122,7 +128,7 @@ class DataProcessorClustering:
             else:
                 raise ValueError('Formato não suportado. Use .xlsx, .xls ou .csv')
             
-            print(f"[OK] Dados carregados: {len(self.dataframe)} registros, {len(self.dataframe.columns)} colunas")
+            self._print(f"[OK] Dados carregados: {len(self.dataframe)} registros, {len(self.dataframe.columns)} colunas")
             return self
             
         except Exception as e:
@@ -160,11 +166,11 @@ class DataProcessorClustering:
             if strict:
                 raise ValueError(msg)
             else:
-                print(msg)
-                print("ℹ O sistema tentará continuar com as colunas disponíveis.")
+                self._print(msg, force=True)
+                self._print("ℹ O sistema tentará continuar com as colunas disponíveis.", force=True)
                 return False, self.missing_columns
-        
-        print("[OK] Todas as colunas obrigatórias estão presentes")
+
+        self._print("[OK] Todas as colunas obrigatórias estão presentes")
         return True, []
     
     def normalize_text(self, text: str) -> str:
@@ -225,8 +231,8 @@ class DataProcessorClustering:
             return 2
         if 'fundamental' in normalized or 'tecnico' in normalized or 'eja' in normalized:
             return 1
-        
-        print(f"[AVISO] Escolaridade nao reconhecida: '{value}' -> usando 0 (sem escolaridade)")
+
+        self._print(f"[AVISO] Escolaridade nao reconhecida: '{value}' -> usando 0 (sem escolaridade)", force=True)
         return 0
     
     def parse_binary(self, value) -> int:
@@ -281,7 +287,7 @@ class DataProcessorClustering:
         try:
             return float(cleaned_text)
         except:
-            print(f"[AVISO] Remuneracao nao reconhecida: '{value}' -> usando 0.0")
+            self._print(f"[AVISO] Remuneracao nao reconhecida: '{value}' -> usando 0.0", force=True)
             return 0.0
     
     def prepare_features_for_clustering(self) -> pd.DataFrame:
@@ -293,8 +299,8 @@ class DataProcessorClustering:
         """
         if self.dataframe is None:
             raise RuntimeError("Dados não carregados. Execute load_data() primeiro.")
-        
-        print("\n[INFO] Preparando features para clustering...")
+
+        self._print("\n[INFO] Preparando features para clustering...")
         
         df = self.dataframe.copy()
         features = {}
@@ -436,17 +442,19 @@ class DataProcessorClustering:
             
             # Converte para meses (arredonda para 1 casa decimal)
             features['program_duration'] = (days_in_program / 30.0).round(1).fillna(0)
-            
-            print(f"  [INFO] Tempo no programa: min={features['program_duration'].min():.1f}, max={features['program_duration'].max():.1f}, media={features['program_duration'].mean():.1f} meses")
+
+            self._print(
+                f"  [INFO] Tempo no programa: min={features['program_duration'].min():.1f}, max={features['program_duration'].max():.1f}, media={features['program_duration'].mean():.1f} meses"
+            )
         
         # Cria DataFrame
         self.processed_data = pd.DataFrame(features)
         self.feature_names = list(features.keys())
-        
-        print(f"[OK] Features preparadas: {len(self.feature_names)} colunas")
-        print(f"  [INFO] Registros: {len(self.processed_data)}")
-        print(f"  [INFO] Features: {', '.join(self.feature_names)}")
-        
+
+        self._print(f"[OK] Features preparadas: {len(self.feature_names)} colunas")
+        self._print(f"  [INFO] Registros: {len(self.processed_data)}")
+        self._print(f"  [INFO] Features: {', '.join(self.feature_names)}")
+
         return self.processed_data
     
     def normalize_features(self, fit: bool = True) -> np.ndarray:
@@ -471,10 +479,10 @@ class DataProcessorClustering:
         # Aplica a normalização
         if fit:
             normalized = self.scaler.fit_transform(weighted_data)
-            print("[OK] Features normalizadas e ponderadas (scaler ajustado)")
+            self._print("[OK] Features normalizadas e ponderadas (scaler ajustado)")
         else:
             normalized = self.scaler.transform(weighted_data)
-            print("[OK] Features normalizadas e ponderadas (usando scaler existente)")
+            self._print("[OK] Features normalizadas e ponderadas (usando scaler existente)")
         
         return normalized
     

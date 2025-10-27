@@ -12,8 +12,9 @@ reports/converted
 build/
 dist/
 __pycache__/
-AI_insights.spec
 scripts/train_clustering_unemployed.py
+presentation_talking_points.md
+__init__.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

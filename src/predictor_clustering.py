@@ -1,7 +1,9 @@
+import json
 import pandas as pd
 import joblib
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, Dict, List
 from src.clustering_engine import ClusteringEngine
 from src.data_processor_clustering import DataProcessorClustering
@@ -15,11 +17,17 @@ class PredictorClustering:
         engine (ClusteringEngine): Motor de clustering carregado.
         processor (DataProcessorClustering): Processador de dados.
         scaler: Normalizador carregado.
-        predictions (list): Resultados das predições.
+        predictions (list): Resultados das análises.
         id_data (pd.DataFrame): Dados identificadores preservados.
     """
     
-    def __init__(self, model_path: str, scaler_path: str, id_columns: Optional[List[str]] = None):
+    def __init__(
+        self,
+        model_path: str,
+        scaler_path: str,
+        id_columns: Optional[List[str]] = None,
+        verbose: bool = True
+    ):
         """
         Inicializa o preditor.
         
@@ -32,21 +40,28 @@ class PredictorClustering:
             raise FileNotFoundError(f"Modelo não encontrado: {model_path}")
         if not os.path.exists(scaler_path):
             raise FileNotFoundError(f"Scaler não encontrado: {scaler_path}")
-        
-        self.engine = ClusteringEngine.load_model(model_path)
+
+        self.verbose = verbose
+        self.engine = ClusteringEngine.load_model(model_path, verbose=verbose)
         self.scaler = joblib.load(scaler_path)
         self.id_columns = id_columns or []
         self.id_data = None
         self.processor = None
         self.predictions = []
-        
-        print(f"✓ Scaler carregado de: {scaler_path}")
+        self.training_metadata = self._load_training_metadata(model_path)
+
+        self._print(f"✓ Scaler carregado de: {scaler_path}")
         if self.id_columns:
-            print(f"✓ Colunas identificadoras: {', '.join(self.id_columns)}")
+            self._print(f"✓ Colunas identificadoras: {', '.join(self.id_columns)}")
+
+    def _print(self, message: str, force: bool = False) -> None:
+        """Exibe mensagem condicionalmente conforme configuração de verbosidade."""
+        if self.verbose or force:
+            print(message)
     
     def load_and_process_data(self, data_path: str) -> 'PredictorClustering':
         """
-        Carrega e processa novos dados para predição.
+        Carrega e processa novos dados para análise.
         
         Args:
             data_path (str): Caminho do arquivo com novos dados.
@@ -54,7 +69,7 @@ class PredictorClustering:
         Returns:
             self: Para encadeamento de métodos.
         """
-        print("\n⏳ Carregando dados para predição...")
+        self._print("\n⏳ Carregando dados para análise...")
         
         # Carrega dados originais
         if data_path.endswith('.csv'):
@@ -65,17 +80,20 @@ class PredictorClustering:
             raise ValueError('Formato não suportado. Use .xlsx, .xls ou .csv')
         
         # Preserva identificadores
+        available_ids: List[str] = []
         if self.id_columns:
             available_ids = [col for col in self.id_columns if col in original_data.columns]
             if available_ids:
                 self.id_data = original_data[available_ids].copy()
-                print(f"✓ Identificadores preservados: {', '.join(available_ids)}")
+                self._print(f"✓ Identificadores preservados: {', '.join(available_ids)}")
             else:
-                print(f"⚠ Nenhuma coluna identificadora encontrada")
+                self._print("⚠ Nenhuma coluna identificadora encontrada", force=True)
                 self.id_data = None
+        else:
+            self.id_data = None
         
         # Processa dados
-        self.processor = DataProcessorClustering(data_path)
+        self.processor = DataProcessorClustering(data_path, verbose=self.verbose)
         self.processor.load_data()
         self.processor.validate_columns(strict=False)
         self.processor.prepare_features_for_clustering()
@@ -86,17 +104,37 @@ class PredictorClustering:
         
         return self
     
+    def _load_training_metadata(self, model_path: str) -> Dict[str, object]:
+        """Carrega metadados do treinamento quando disponíveis."""
+        metadata_path = Path(model_path).with_name('clustering_metadata.json')
+        if not metadata_path.exists():
+            return {}
+
+        try:
+            with metadata_path.open('r', encoding='utf-8') as handler:
+                payload = json.load(handler)
+            if isinstance(payload, dict):
+                return payload
+        except Exception as exc:  # pragma: no cover - falhas não devem interromper fluxo
+            self._print(f"⚠ Não foi possível carregar os metadados do treinamento: {exc}", force=True)
+
+        return {}
+
+    def get_training_metadata(self) -> Dict[str, object]:
+        """Retorna os metadados conhecidos sobre o treinamento do modelo."""
+        return dict(self.training_metadata)
+
     def predict(self) -> 'PredictorClustering':
         """
-        Realiza predições nos dados carregados.
+        Realiza análises nos dados carregados.
         
         Returns:
             self: Para encadeamento de métodos.
         """
         if self.processor is None or self.processor.processed_data is None:
             raise RuntimeError("Dados não carregados. Execute load_and_process_data() primeiro.")
-        
-        print("\n⏳ Realizando predições...")
+
+        self._print("\n⏳ Realizando análise...")
         
         # Normaliza dados
         features_normalized = self.processor.scaler.transform(self.processor.processed_data)
@@ -104,7 +142,7 @@ class PredictorClustering:
         # Prediz clusters
         cluster_ids = self.engine.predict(features_normalized)
         
-        # Gera predições detalhadas
+        # Gera análises detalhadas
         self.predictions = []
         for idx, cluster_id in enumerate(cluster_ids):
             # Label semântico
@@ -133,15 +171,15 @@ class PredictorClustering:
             
             self.predictions.append(prediction)
         
-        print(f"✓ Predições concluídas: {len(self.predictions)} casos analisados")
+        self._print(f"✓ Análise concluída: {len(self.predictions)} caso(s) analisado(s)")
         
         # Resumo
         from collections import Counter
         class_counts = Counter([p['classification'] for p in self.predictions])
-        print(f"\n📊 Resumo:")
+        self._print("\n📊 Resumo:")
         for label, count in class_counts.items():
             pct = count / len(self.predictions) * 100
-            print(f"  {label}: {count} ({pct:.1f}%)")
+            self._print(f"  {label}: {count} ({pct:.1f}%)")
         
         return self
     
@@ -153,7 +191,7 @@ class PredictorClustering:
             pd.DataFrame: Relatório formatado.
         """
         if not self.predictions:
-            raise RuntimeError("Predições não realizadas. Execute predict() primeiro.")
+            raise RuntimeError("Análises não realizadas. Execute predict() primeiro.")
         
         # Cria DataFrame base
         report = pd.DataFrame({
@@ -165,7 +203,7 @@ class PredictorClustering:
             for col in self.id_data.columns:
                 report[col] = self.id_data[col].values
         
-        # Adiciona predições
+        # Adiciona análises
         report['Classificação'] = [p['classification'] for p in self.predictions]
         report['Confiança'] = [f"{p['confidence']:.1f}%" for p in self.predictions]
         report['Nível_de_Risco'] = [p['risk_level'] for p in self.predictions]
@@ -175,7 +213,7 @@ class PredictorClustering:
     
     def save_predictions_to_txt(self, output_path: str = None) -> str:
         """
-        Salva predições em arquivo TXT legível.
+        Salva análises em arquivo TXT legível.
         
         Args:
             output_path (str): Caminho de saída.
@@ -184,7 +222,7 @@ class PredictorClustering:
             str: Caminho do arquivo salvo.
         """
         if not self.predictions:
-            raise RuntimeError("Predições não realizadas. Execute predict() primeiro.")
+            raise RuntimeError("Análises não realizadas. Execute predict() primeiro.")
         
         if output_path is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -257,12 +295,12 @@ class PredictorClustering:
             f.write("qualificados antes de tomar decisões finais.\n")
             f.write("-"*70 + "\n")
         
-        print(f"✓ Relatório TXT salvo em: {output_path}")
+        self._print(f"✓ Relatório TXT salvo em: {output_path}")
         return output_path
     
     def save_predictions_to_csv(self, output_path: str = None) -> str:
         """
-        Salva predições em arquivo CSV.
+        Salva análises em arquivo CSV.
         
         Args:
             output_path (str): Caminho de saída.
@@ -271,7 +309,7 @@ class PredictorClustering:
             str: Caminho do arquivo salvo.
         """
         if not self.predictions:
-            raise RuntimeError("Predições não realizadas. Execute predict() primeiro.")
+            raise RuntimeError("Análises não realizadas. Execute predict() primeiro.")
         
         if output_path is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -280,7 +318,7 @@ class PredictorClustering:
         report = self.generate_report()
         report.to_csv(output_path, index=False, encoding='utf-8-sig')
         
-        print(f"✓ Relatório CSV salvo em: {output_path}")
+        self._print(f"✓ Relatório CSV salvo em: {output_path}")
         return output_path
     
     def get_summary_stats(self) -> Dict:
@@ -288,10 +326,10 @@ class PredictorClustering:
         Retorna estatísticas resumidas para clusters e riscos.
         
         Returns:
-            dict: Estatísticas agregadas das predições.
+            dict: Estatísticas agregadas das análises.
         """
         if not self.predictions:
-            raise RuntimeError("Predições não realizadas. Execute predict() primeiro.")
+            raise RuntimeError("Análises não realizadas. Execute predict() primeiro.")
 
         from collections import Counter
 

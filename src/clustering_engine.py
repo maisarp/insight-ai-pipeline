@@ -424,13 +424,14 @@ class ClusteringEngine:
         return output_path
     
     @staticmethod
-    def load_model(model_path: str) -> 'ClusteringEngine':
+    def load_model(model_path: str, verbose: bool = True) -> 'ClusteringEngine':
         """
         Carrega modelo salvo.
-        
+
         Args:
             model_path (str): Caminho do modelo.
-        
+            verbose (bool): Define se mensagens informativas devem ser exibidas.
+
         Returns:
             ClusteringEngine: Instância com modelo carregado.
         """
@@ -445,10 +446,11 @@ class ClusteringEngine:
         engine.cluster_labels = model_data['cluster_labels']
         engine.feature_names = model_data['feature_names']
         engine.is_trained = True
-        
-        print(f"✓ Modelo carregado de: {model_path}")
-        print(f"  Clusters: {engine.n_clusters}")
-        print(f"  Labels: {list(engine.cluster_labels.values())}")
+
+        if verbose:
+            print(f"✓ Modelo carregado de: {model_path}")
+            print(f"  Clusters: {engine.n_clusters}")
+            print(f"  Labels: {list(engine.cluster_labels.values())}")
         
         return engine
 

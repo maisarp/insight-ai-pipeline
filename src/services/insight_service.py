@@ -10,6 +10,11 @@ class ClusterInsightService:
     def __init__(self, training_report_path: Path | None = None) -> None:
         """Inicializa o serviço e prepara o mapa de insights."""
         self.training_report_path = training_report_path
+        self._disclaimer = (
+            "OBSERVAÇÃO IMPORTANTE: Este modelo inicial foi treinado com uma amostra reduzida,\n"
+            "servindo apenas como apoio às equipes técnicas. Sempre confirme as sugestões com\n"
+            "avaliação humana especializada."
+        )
         self.insight_map = self._build_insight_map()
 
     def _build_insight_map(self) -> Dict[str, Dict[str, List[str] | str]]:
@@ -42,16 +47,18 @@ class ClusterInsightService:
                     "Investigue se permanecem barreiras ocultas (como dependência química) antes do desligamento.",
                     "Planeje roteiro de acompanhamento pós-saída para evitar rupturas abruptas.",
                     "Utilize os dados para conectar o participante a vagas, cursos e monitoramento remoto.",
+                    self._disclaimer,
                 ]
             },
             "Apoio Intensivo": {
                 "summary": "Perfil com vulnerabilidades acumuladas que exige apoio contínuo e intensivo.",
                 "details": [
                     "Demanda articulação multidisciplinar entre assistência social, saúde e geração de renda.",
-                    "Avalie sinais de dependência química, saúde mental e violência para priorizar intervenções.",
+                    "Avalie sinais de dependência química, saúde mental e física para priorizar intervenções.",
                     "Fortaleça vínculos com redes de proteção social e serviços especializados.",
-                    "Crie atividades práticas que desenvolvam habilidades profissionais e educacionais.",
+                    "Priorize atividades práticas que desenvolvam habilidades profissionais e educacionais.",
                     "Registre metas de curto prazo e indicadores monitorados semanalmente pela equipe.",
+                    self._disclaimer,
                 ]
             },
             "Monitoramento Ativo": {
@@ -61,6 +68,7 @@ class ClusterInsightService:
                     "Mapeie gatilhos de regressão (incluindo recaídas em uso de substâncias) para respostas rápidas.",
                     "Mantenha reuniões periódicas para recalibrar o plano individual conforme evolução.",
                     "Aproveite os dados para direcionar mentorias, oficinas e intervenções específicas.",
+                    self._disclaimer,
                 ]
             }
         }
