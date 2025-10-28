@@ -47,6 +47,7 @@ class DataProcessorClustering:
         'CPF',
         'RG',
         'ID',
+        'ID_Atendido',
         'Identificador',
         'Matrícula'
     ]
@@ -209,41 +210,42 @@ class DataProcessorClustering:
                 delimiters = [',', ';', '\t']
                 self.dataframe = None
                 last_error = None
-                
+
                 for encoding in encodings:
                     for delimiter in delimiters:
                         try:
                             df = pd.read_csv(
-                                self.file_path, 
-                                encoding=encoding, 
+                                self.file_path,
+                                encoding=encoding,
                                 delimiter=delimiter,
-                                on_bad_lines='skip'  # Pula linhas problemáticas
+                                on_bad_lines='skip'
                             )
                             # Verifica se o CSV foi lido corretamente (tem mais de 1 coluna)
                             if not df.empty and len(df.columns) > 1:
                                 self.dataframe = df
-                                self._print(f"[OK] CSV carregado com encoding: {encoding}, delimitador: '{delimiter}'")
+                                self._print(
+                                    f"[OK] CSV carregado com encoding: {encoding}, delimitador: '{delimiter}'"
+                                )
                                 break
                         except Exception as e:
                             last_error = e
                             continue
-                    
+
                     if self.dataframe is not None:
                         break
-                
+
                 if self.dataframe is None:
                     raise RuntimeError(
-                        f"Não foi possível ler o CSV com nenhuma combinação de encoding/delimitador. "
+                        "Não foi possível ler o CSV com nenhuma combinação de encoding/delimitador. "
                         f"Último erro: {last_error}"
                     )
-            
-            # Valida se o CSV tem dados significativos
-            if not self._has_meaningful_data(self.dataframe):
-                raise ValueError(
-                    "O arquivo não contém dados válidos para análise. "
-                    "Todas as linhas estão vazias ou não possuem informações significativas."
-                )
-                    
+
+                if not self._has_meaningful_data(self.dataframe):
+                    raise ValueError(
+                        "O arquivo não contém dados válidos para análise. "
+                        "Todas as linhas estão vazias ou não possuem informações significativas."
+                    )
+
             elif lower.endswith(('.xlsx', '.xls')):
                 # Para arquivos Excel, usa engine openpyxl que lida melhor com encoding
                 try:
@@ -251,19 +253,21 @@ class DataProcessorClustering:
                 except Exception:
                     # Fallback para engine padrão
                     self.dataframe = pd.read_excel(self.file_path)
-                
-                # Valida se o Excel tem dados significativos
+
                 if not self._has_meaningful_data(self.dataframe):
                     raise ValueError(
                         "O arquivo não contém dados válidos para análise. "
                         "Todas as linhas estão vazias ou não possuem informações significativas."
                     )
+
             else:
                 raise ValueError('Formato não suportado. Use .xlsx, .xls ou .csv')
-            
-            self._print(f"[OK] Dados carregados: {len(self.dataframe)} registros, {len(self.dataframe.columns)} colunas")
+
+            self._print(
+                f"[OK] Dados carregados: {len(self.dataframe)} registros, {len(self.dataframe.columns)} colunas"
+            )
             return self
-            
+
         except Exception as e:
             raise RuntimeError(f"Erro ao carregar arquivo: {str(e)}")
     
@@ -316,10 +320,7 @@ class DataProcessorClustering:
         Valida se existe pelo menos uma coluna identificadora com dados válidos.
         
         Returns:
-            tuple: (is_valid, identifier_found or error_message)
-        
-        Raises:
-            ValueError: Se nenhuma coluna identificadora válida for encontrada.
+            tuple: (is_valid, identifier_found)
         """
         if self.dataframe is None:
             raise RuntimeError("Dados não carregados. Execute load_data() primeiro.")
@@ -347,25 +348,12 @@ class DataProcessorClustering:
                     found_identifiers.append(original_col_name)
         
         if not found_identifiers:
-            # Constrói mensagem de erro detalhada
-            error_msg = (
-                f"\n{'='*80}\n"
-                f"❌ ERRO: Nenhuma coluna identificadora válida encontrada\n"
-                f"{'='*80}\n\n"
-                f"Para realizar a análise, é necessário ter pelo menos UMA coluna\n"
-                f"identificadora com dados válidos (não-vazios).\n\n"
-                f"{'─'*80}\n\n"
-                f"📋 COLUNAS IDENTIFICADORAS ACEITAS (pelo menos uma deve existir):\n\n" +
-                "\n".join([f"  • {col}" for col in self.IDENTIFIER_COLUMNS]) +
-                f"\n\n{'─'*80}\n\n"
-                f"💡 DICAS:\n"
-                f"   1. Adicione uma coluna com nome, CPF, RG ou outro identificador\n"
-                f"   2. Verifique se a coluna identificadora não está vazia\n"
-                f"   3. Os nomes devem ser idênticos aos listados acima\n\n"
-                f"{'='*80}\n"
+            self._print(
+                "\n⚠ Nenhuma coluna identificadora válida encontrada. Seguiremos sem identificadores.",
+                force=True
             )
-            raise ValueError(error_msg)
-        
+            return False, None
+
         self._print(f"✓ Coluna(s) identificadora(s) encontrada(s): {', '.join(found_identifiers)}")
         return True, found_identifiers[0]
     

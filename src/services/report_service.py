@@ -249,12 +249,12 @@ class ClusterReportBuilder:
             self._write_training_metadata_lines(handler, metadata)
             handler.write("\n")
 
-            handler.write("------ Avisos e responsabilidade ------\n")
+            handler.write("\n-------- AVISOS E RESPONSABILIDADE --------\n\n")
             handler.write(
                 "Nota sobre a análise: Esta análise foi gerada por um modelo de inteligência artificial treinado com dados históricos anonimizados de programas sociais. Os resultados servem como apoio à decisão e precisam ser combinados com a avaliação profissional. Nenhuma decisão deve ser tomada exclusivamente com base nessa análise.\n"
             )
             handler.write(self.model_disclaimer)
-            handler.write("------ Fim dos avisos ------\n")
+            handler.write("\n-------------------------------------------\n")
 
 
     def _write_batch_summary(
@@ -389,7 +389,7 @@ class ClusterReportBuilder:
             )
 
         handler.write("IMPORTANTE: Remova ou anonimize completamente qualquer dado identificável antes de consultar uma IA aberta.\n")
-        handler.write("====== Fim das boas práticas ======\n\n")
+        handler.write("\n\n======Fim das boas práticas ======\n\n")
 
     def _format_training_metadata_lines(self, metadata: Dict[str, Any]) -> List[str]:
         """Formata metadados do treinamento para exibição legível."""
