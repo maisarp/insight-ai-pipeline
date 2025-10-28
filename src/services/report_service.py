@@ -45,7 +45,7 @@ class ClusterReportBuilder:
         stats = predictor.get_summary_stats()
         total = stats["total"]
 
-        print("\n=== Visão Geral da Análise ===\n")
+        print("\n====== Visão Geral da Análise ======\n")
         print(f"Casos analisados: {total}")
         for label, payload in stats["clusters"].items():
             percentage = payload["percentage"]
@@ -64,7 +64,7 @@ class ClusterReportBuilder:
     def show_cluster_insights(self, labels: Iterable[str]) -> None:
         """Apresenta insights associados aos clusters observados."""
         printed = set()
-        print("\n=== Insights por Grupo ===")
+        print("\n====== Insights por Grupo ======")
         for label in labels:
             if label in printed:
                 continue
@@ -89,7 +89,7 @@ class ClusterReportBuilder:
             if "ID" not in identifier_columns and "ID" in report.columns:
                 identifier_columns.insert(0, "ID")
 
-        print("=== Classificação por Registro ===\n")
+        print("====== Classificação por Registro ======\n")
         if report.empty:
             print("Nenhum registro disponível para exibir.")
             return
@@ -366,7 +366,7 @@ class ClusterReportBuilder:
 
     def _write_support_prompt(self, handler, classification: str | None, risk: str | None) -> None:
         """Inclui orientações de boas práticas para uso responsável de IA aberta."""
-        handler.write("====== Boas práticas para usar IA aberta como apoio estratégico ======\n")
+        handler.write("====== Boas práticas para usar IA aberta como apoio estratégico ======\n\n")
         handler.write("  • Utilize a IA para fazer brainstorm de iniciativas, melhorias e planos de acompanhamento alinhados ao perfil analisado.\n")
         handler.write("  • Compartilhe apenas informações analíticas anonimizadas (substitua nomes, documentos e referências diretas por descrições genéricas).\n")
         handler.write("  • Reforce no pedido à IA que qualquer sugestão deve respeitar políticas públicas brasileiras, ética profissional e segurança do participante.\n")

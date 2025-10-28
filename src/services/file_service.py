@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 import pandas as pd
+import numpy as np
 
 
 class InputFileService:
@@ -37,6 +38,39 @@ class InputFileService:
             return False, "Arquivo vazio. Forneça um arquivo contendo registros."
 
         return True, ""
+    
+    def _has_meaningful_data(self, dataframe: pd.DataFrame) -> bool:
+        """
+        Verifica se o dataframe contém dados significativos.
+        
+        Args:
+            dataframe (pd.DataFrame): DataFrame a ser validado.
+        
+        Returns:
+            bool: True se há pelo menos uma célula com dado significativo.
+        """
+        if dataframe.empty:
+            return False
+        
+        # Remove linhas completamente vazias
+        df_no_empty_rows = dataframe.dropna(how='all')
+        
+        if df_no_empty_rows.empty:
+            return False
+        
+        # Verifica se existe pelo menos uma célula com dado não-vazio e não-nan
+        for col in df_no_empty_rows.columns:
+            for value in df_no_empty_rows[col]:
+                # Ignora NaN/None
+                if pd.isna(value):
+                    continue
+                # Converte para string e verifica se não está vazio
+                str_value = str(value).strip()
+                if str_value and str_value.lower() not in {'nan', 'none', ''}:
+                    return True
+        
+        return False
+
 
     def ensure_csv(self, path: Path) -> Tuple[Path, bool]:
         """Garante que o arquivo esteja em CSV, convertendo quando necessário."""
@@ -44,7 +78,22 @@ class InputFileService:
         if extension == ".csv":
             return path, False
 
-        dataframe = pd.read_excel(path)
+        # Tenta ler Excel com tratamento de encoding robusto
+        try:
+            dataframe = pd.read_excel(path, engine='openpyxl')
+        except Exception:
+            try:
+                # Fallback para engine padrão
+                dataframe = pd.read_excel(path)
+            except Exception as e:
+                raise ValueError(f"Não foi possível ler o arquivo Excel: {str(e)}")
+        
+        # Valida se o arquivo tem dados significativos
+        if not self._has_meaningful_data(dataframe):
+            raise ValueError(
+                "O arquivo não contém dados válidos para análise. "
+                "Todas as linhas estão vazias ou não possuem informações significativas."
+            )
 
         target_dir = self.conversion_dir or path.parent
         target_dir.mkdir(parents=True, exist_ok=True)

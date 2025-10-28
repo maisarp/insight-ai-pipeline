@@ -71,11 +71,48 @@ class PredictorClustering:
         """
         self._print("\n⏳ Carregando dados para análise...")
         
-        # Carrega dados originais
+        # Carrega dados originais com tratamento de encoding e delimitadores robusto
         if data_path.endswith('.csv'):
-            original_data = pd.read_csv(data_path, encoding='utf-8-sig')
+            # Tenta diferentes encodings e delimitadores para CSV
+            encodings = ['utf-8-sig', 'latin-1', 'iso-8859-1', 'cp1252']
+            delimiters = [',', ';', '\t']
+            original_data = None
+            last_error = None
+            
+            for encoding in encodings:
+                for delimiter in delimiters:
+                    try:
+                        df = pd.read_csv(
+                            data_path, 
+                            encoding=encoding, 
+                            delimiter=delimiter,
+                            on_bad_lines='skip'
+                        )
+                        # Verifica se foi lido corretamente (mais de 1 coluna)
+                        if not df.empty and len(df.columns) > 1:
+                            original_data = df
+                            self._print(f"✓ CSV carregado com encoding: {encoding}, delimitador: '{delimiter}'")
+                            break
+                    except Exception as e:
+                        last_error = e
+                        continue
+                
+                if original_data is not None:
+                    break
+            
+            if original_data is None:
+                raise RuntimeError(
+                    f"Não foi possível ler o CSV. Verifique se o arquivo está corrompido ou tem formato inválido. "
+                    f"Último erro: {last_error}"
+                )
+                
         elif data_path.endswith(('.xlsx', '.xls')):
-            original_data = pd.read_excel(data_path)
+            # Para arquivos Excel, usa engine openpyxl que lida melhor com encoding
+            try:
+                original_data = pd.read_excel(data_path, engine='openpyxl')
+            except Exception:
+                # Fallback para engine padrão
+                original_data = pd.read_excel(data_path)
         else:
             raise ValueError('Formato não suportado. Use .xlsx, .xls ou .csv')
         
@@ -96,6 +133,7 @@ class PredictorClustering:
         self.processor = DataProcessorClustering(data_path, verbose=self.verbose)
         self.processor.load_data()
         self.processor.validate_columns(strict=False)
+        self.processor.validate_identifier_columns()  # Valida coluna identificadora
         self.processor.prepare_features_for_clustering()
         
         # Normaliza usando scaler treinado

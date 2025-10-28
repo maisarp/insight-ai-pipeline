@@ -40,6 +40,17 @@ class DataProcessorClustering:
         'Data de Cadastro'
     ]
     
+    # Colunas identificadoras esperadas (pelo menos uma deve existir e ter dados)
+    IDENTIFIER_COLUMNS = [
+        'Nome completo',
+        'Nome',
+        'CPF',
+        'RG',
+        'ID',
+        'Identificador',
+        'Matrícula'
+    ]
+    
     # Mapeamentos para encoding
     EDUCATION_BASE_MAP = {
         # Sem escolaridade
@@ -104,6 +115,77 @@ class DataProcessorClustering:
         if self.verbose or force:
             print(message)
     
+    def _has_meaningful_data(self, dataframe: pd.DataFrame) -> bool:
+        """
+        Verifica se o dataframe contém dados significativos.
+        
+        Args:
+            dataframe (pd.DataFrame): DataFrame a ser validado.
+        
+        Returns:
+            bool: True se há pelo menos uma célula com dado significativo.
+        """
+        if dataframe.empty:
+            return False
+        
+        # Remove linhas completamente vazias
+        df_no_empty_rows = dataframe.dropna(how='all')
+        
+        if df_no_empty_rows.empty:
+            return False
+        
+        # Verifica se existe pelo menos uma célula com dado não-vazio e não-nan
+        for col in df_no_empty_rows.columns:
+            for value in df_no_empty_rows[col]:
+                # Ignora NaN/None
+                if pd.isna(value):
+                    continue
+                # Converte para string e verifica se não está vazio
+                str_value = str(value).strip()
+                if str_value and str_value.lower() not in {'nan', 'none', ''}:
+                    return True
+        
+        return False
+    
+    def _build_missing_columns_error(self, missing_columns: List[str]) -> str:
+        """
+        Constrói mensagem de erro formatada para colunas faltantes.
+        
+        Args:
+            missing_columns: Lista de nomes de colunas faltantes.
+            
+        Returns:
+            str: Mensagem de erro formatada.
+        """
+        all_required = [
+            "• Gênero",
+            "• Idade", 
+            "• Estado civil",
+            "• Bolsa Família",
+            "• Grau de escolaridade",
+            "• Situação escolar",
+            "• Situação de Trabalho",
+            "• Remuneração",
+            "• Procurando trabalho",
+            "• Faz ou fez uso de drogas",
+            "• Data de Cadastro"
+        ]
+        
+        return (
+            f"\n{'='*80}\n"
+            f"❌ ERRO: O arquivo não possui todas as colunas necessárias\n"
+            f"{'='*80}\n\n"
+            f"Coluna(s) faltando no seu arquivo:\n" +
+            "\n".join([f"  ✗ {col}" for col in missing_columns]) +
+            f"\n\n{'─'*80}\n\n"
+            f"📋 COLUNAS OBRIGATÓRIAS (todas devem estar presentes):\n\n" +
+            "\n".join([f"  {col}" for col in all_required]) +
+            f"\n\n{'─'*80}\n\n"
+            f"💡 DICA: Verifique se sua planilha possui EXATAMENTE esses nomes de colunas.\n"
+            f"   Os nomes devem ser idênticos, incluindo acentos e espaços.\n\n"
+            f"{'='*80}\n"
+        )
+    
     def load_data(self) -> 'DataProcessorClustering':
         """
         Carrega dados do arquivo.
@@ -122,9 +204,60 @@ class DataProcessorClustering:
         
         try:
             if lower.endswith('.csv'):
-                self.dataframe = pd.read_csv(self.file_path, encoding='utf-8-sig')
+                # Tenta diferentes encodings e delimitadores para CSV
+                encodings = ['utf-8-sig', 'latin-1', 'iso-8859-1', 'cp1252']
+                delimiters = [',', ';', '\t']
+                self.dataframe = None
+                last_error = None
+                
+                for encoding in encodings:
+                    for delimiter in delimiters:
+                        try:
+                            df = pd.read_csv(
+                                self.file_path, 
+                                encoding=encoding, 
+                                delimiter=delimiter,
+                                on_bad_lines='skip'  # Pula linhas problemáticas
+                            )
+                            # Verifica se o CSV foi lido corretamente (tem mais de 1 coluna)
+                            if not df.empty and len(df.columns) > 1:
+                                self.dataframe = df
+                                self._print(f"[OK] CSV carregado com encoding: {encoding}, delimitador: '{delimiter}'")
+                                break
+                        except Exception as e:
+                            last_error = e
+                            continue
+                    
+                    if self.dataframe is not None:
+                        break
+                
+                if self.dataframe is None:
+                    raise RuntimeError(
+                        f"Não foi possível ler o CSV com nenhuma combinação de encoding/delimitador. "
+                        f"Último erro: {last_error}"
+                    )
+            
+            # Valida se o CSV tem dados significativos
+            if not self._has_meaningful_data(self.dataframe):
+                raise ValueError(
+                    "O arquivo não contém dados válidos para análise. "
+                    "Todas as linhas estão vazias ou não possuem informações significativas."
+                )
+                    
             elif lower.endswith(('.xlsx', '.xls')):
-                self.dataframe = pd.read_excel(self.file_path)
+                # Para arquivos Excel, usa engine openpyxl que lida melhor com encoding
+                try:
+                    self.dataframe = pd.read_excel(self.file_path, engine='openpyxl')
+                except Exception:
+                    # Fallback para engine padrão
+                    self.dataframe = pd.read_excel(self.file_path)
+                
+                # Valida se o Excel tem dados significativos
+                if not self._has_meaningful_data(self.dataframe):
+                    raise ValueError(
+                        "O arquivo não contém dados válidos para análise. "
+                        "Todas as linhas estão vazias ou não possuem informações significativas."
+                    )
             else:
                 raise ValueError('Formato não suportado. Use .xlsx, .xls ou .csv')
             
@@ -162,16 +295,79 @@ class DataProcessorClustering:
                 self.missing_columns.append(req_col)
         
         if self.missing_columns:
-            msg = f"⚠ Colunas obrigatórias faltando: {', '.join(self.missing_columns)}"
             if strict:
-                raise ValueError(msg)
+                # Usa método centralizado para construir mensagem de erro
+                error_msg = self._build_missing_columns_error(self.missing_columns)
+                raise ValueError(error_msg)
             else:
-                self._print(msg, force=True)
-                self._print("ℹ O sistema tentará continuar com as colunas disponíveis.", force=True)
+                # Modo não-strict: aviso simples
+                self._print(f"\n⚠ Atenção: Algumas colunas obrigatórias estão faltando:", force=True)
+                for col in self.missing_columns:
+                    self._print(f"  ✗ {col}", force=True)
+                self._print("\n💡 O sistema tentará continuar, mas a qualidade da análise pode ser afetada.", force=True)
+                self._print("   Recomendamos usar um arquivo com todas as colunas obrigatórias.\n", force=True)
                 return False, self.missing_columns
 
-        self._print("[OK] Todas as colunas obrigatórias estão presentes")
+        self._print("✓ Todas as colunas obrigatórias estão presentes")
         return True, []
+    
+    def validate_identifier_columns(self) -> Tuple[bool, Optional[str]]:
+        """
+        Valida se existe pelo menos uma coluna identificadora com dados válidos.
+        
+        Returns:
+            tuple: (is_valid, identifier_found or error_message)
+        
+        Raises:
+            ValueError: Se nenhuma coluna identificadora válida for encontrada.
+        """
+        if self.dataframe is None:
+            raise RuntimeError("Dados não carregados. Execute load_data() primeiro.")
+        
+        # Normaliza nomes das colunas do arquivo
+        df_columns_normalized = {col.strip().lower(): col for col in self.dataframe.columns}
+        
+        # Procura por colunas identificadoras
+        found_identifiers = []
+        for id_col in self.IDENTIFIER_COLUMNS:
+            id_normalized = id_col.strip().lower()
+            if id_normalized in df_columns_normalized:
+                original_col_name = df_columns_normalized[id_normalized]
+                
+                # Verifica se a coluna tem pelo menos um valor não-vazio
+                has_data = False
+                for value in self.dataframe[original_col_name]:
+                    if pd.notna(value) and str(value).strip():
+                        str_val = str(value).strip().lower()
+                        if str_val not in {'nan', 'none', ''}:
+                            has_data = True
+                            break
+                
+                if has_data:
+                    found_identifiers.append(original_col_name)
+        
+        if not found_identifiers:
+            # Constrói mensagem de erro detalhada
+            error_msg = (
+                f"\n{'='*80}\n"
+                f"❌ ERRO: Nenhuma coluna identificadora válida encontrada\n"
+                f"{'='*80}\n\n"
+                f"Para realizar a análise, é necessário ter pelo menos UMA coluna\n"
+                f"identificadora com dados válidos (não-vazios).\n\n"
+                f"{'─'*80}\n\n"
+                f"📋 COLUNAS IDENTIFICADORAS ACEITAS (pelo menos uma deve existir):\n\n" +
+                "\n".join([f"  • {col}" for col in self.IDENTIFIER_COLUMNS]) +
+                f"\n\n{'─'*80}\n\n"
+                f"💡 DICAS:\n"
+                f"   1. Adicione uma coluna com nome, CPF, RG ou outro identificador\n"
+                f"   2. Verifique se a coluna identificadora não está vazia\n"
+                f"   3. Os nomes devem ser idênticos aos listados acima\n\n"
+                f"{'='*80}\n"
+            )
+            raise ValueError(error_msg)
+        
+        self._print(f"✓ Coluna(s) identificadora(s) encontrada(s): {', '.join(found_identifiers)}")
+        return True, found_identifiers[0]
     
     def normalize_text(self, text: str) -> str:
         """
@@ -232,7 +428,7 @@ class DataProcessorClustering:
         if 'fundamental' in normalized or 'tecnico' in normalized or 'eja' in normalized:
             return 1
 
-        self._print(f"[AVISO] Escolaridade nao reconhecida: '{value}' -> usando 0 (sem escolaridade)", force=True)
+        self._print(f"⚠ Valor não reconhecido na coluna 'Grau de escolaridade': '{value}' (usando valor padrão: sem escolaridade)", force=True)
         return 0
     
     def parse_binary(self, value) -> int:
@@ -287,7 +483,7 @@ class DataProcessorClustering:
         try:
             return float(cleaned_text)
         except:
-            self._print(f"[AVISO] Remuneracao nao reconhecida: '{value}' -> usando 0.0", force=True)
+            self._print(f"⚠ Valor não reconhecido na coluna 'Remuneração': '{value}' (usando valor padrão: R$ 0,00)", force=True)
             return 0.0
     
     def prepare_features_for_clustering(self) -> pd.DataFrame:
@@ -300,7 +496,7 @@ class DataProcessorClustering:
         if self.dataframe is None:
             raise RuntimeError("Dados não carregados. Execute load_data() primeiro.")
 
-        self._print("\n[INFO] Preparando features para clustering...")
+        self._print("\n📊 Preparando dados para análise...")
         
         df = self.dataframe.copy()
         features = {}
@@ -429,7 +625,7 @@ class DataProcessorClustering:
                 
             features['substance_dependency'] = df['Faz ou fez uso de drogas'].astype(str).apply(parse_substance_dependency)
 
-        # 10. Tempo no programa (em meses)
+        # 10. Tempo no programa (em meses) - calculado a partir da Data de Cadastro
         if 'Data de Cadastro' in df.columns:
             from datetime import datetime
             
@@ -444,16 +640,18 @@ class DataProcessorClustering:
             features['program_duration'] = (days_in_program / 30.0).round(1).fillna(0)
 
             self._print(
-                f"  [INFO] Tempo no programa: min={features['program_duration'].min():.1f}, max={features['program_duration'].max():.1f}, media={features['program_duration'].mean():.1f} meses"
+                f"  ✓ Coluna 'Data de Cadastro' processada: tempo mínimo={features['program_duration'].min():.1f} meses, "
+                f"tempo máximo={features['program_duration'].max():.1f} meses, "
+                f"tempo médio={features['program_duration'].mean():.1f} meses"
             )
         
         # Cria DataFrame
         self.processed_data = pd.DataFrame(features)
         self.feature_names = list(features.keys())
 
-        self._print(f"[OK] Features preparadas: {len(self.feature_names)} colunas")
-        self._print(f"  [INFO] Registros: {len(self.processed_data)}")
-        self._print(f"  [INFO] Features: {', '.join(self.feature_names)}")
+        self._print(f"\n✓ Dados preparados com sucesso!")
+        self._print(f"  • Total de registros processados: {len(self.processed_data)}")
+        self._print(f"  • Total de características analisadas: {len(self.feature_names)}")
 
         return self.processed_data
     
@@ -470,6 +668,38 @@ class DataProcessorClustering:
         if self.processed_data is None:
             raise RuntimeError("Features não preparadas. Execute prepare_features_for_clustering() primeiro.")
         
+        # Valida features esperadas vs presentes (apenas quando NÃO está ajustando)
+        if not fit and hasattr(self.scaler, 'feature_names_in_'):
+            expected_features = set(self.scaler.feature_names_in_)
+            current_features = set(self.processed_data.columns)
+            
+            missing = expected_features - current_features
+            if missing:
+                # Mapeia nomes técnicos para nomes de colunas
+                feature_map = {
+                    'age': 'Idade',
+                    'marital_status_single': 'Estado civil',
+                    'marital_status_married': 'Estado civil',
+                    'family_benefit': 'Bolsa Família',
+                    'education_level': 'Grau de escolaridade',
+                    'studying': 'Situação escolar',
+                    'employment_signal': 'Situação de Trabalho',
+                    'income': 'Remuneração',
+                    'looking_for_job': 'Procurando trabalho',
+                    'substance_dependency': 'Faz ou fez uso de drogas',
+                    'program_duration': 'Data de Cadastro'
+                }
+                
+                missing_readable = []
+                for feat in missing:
+                    readable_name = feature_map.get(feat, feat)
+                    if readable_name not in missing_readable:  # Evita duplicatas
+                        missing_readable.append(readable_name)
+                
+                # Reutiliza o método centralizado para construir a mensagem
+                error_msg = self._build_missing_columns_error(missing_readable)
+                raise ValueError(error_msg)
+        
         # Aplica pesos às features
         weighted_data = self.processed_data.copy()
         for feature in self.processed_data.columns:
@@ -479,10 +709,10 @@ class DataProcessorClustering:
         # Aplica a normalização
         if fit:
             normalized = self.scaler.fit_transform(weighted_data)
-            self._print("[OK] Features normalizadas e ponderadas (scaler ajustado)")
+            self._print("✓ Dados normalizados e ponderados com sucesso (ajuste inicial)")
         else:
             normalized = self.scaler.transform(weighted_data)
-            self._print("[OK] Features normalizadas e ponderadas (usando scaler existente)")
+            self._print("✓ Dados normalizados usando padrão do treinamento")
         
         return normalized
     

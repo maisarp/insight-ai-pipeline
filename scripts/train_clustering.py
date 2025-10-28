@@ -9,7 +9,8 @@ import json
 import os
 import sys
 from datetime import datetime
-
+from pathlib import Path
+from typing import Dict, List
 import numpy as np
 
 # Adiciona src ao path
@@ -43,6 +44,116 @@ def describe_education_level(mean_value: float) -> str:
     return "Sem escolaridade informada"
 
 
+def is_numeric(value: object) -> bool:
+    """
+    Indica se o valor informado representa um número válido.
+    """
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return False
+    return not np.isnan(numeric)
+
+
+def build_release_notes(stats: Dict[str, Dict[str, float]]) -> List[str]:
+    """
+    Cria lista com os principais motivos para o cluster de possível liberação.
+    """
+    notes: List[str] = []
+
+    income_mean = stats.get('income', {}).get('mean')
+    if is_numeric(income_mean):
+        notes.append(
+            f"Renda média declarada de R$ {float(income_mean):.2f}, indicando alguma ocupação"
+        )
+
+    looking_mean = stats.get('looking_for_job', {}).get('mean')
+    studying_mean = stats.get('studying', {}).get('mean')
+    if is_numeric(looking_mean) and is_numeric(studying_mean):
+        notes.append(
+            f"{format_percentage(float(looking_mean))}% buscando emprego e {format_percentage(float(studying_mean))}% estudando (sinais de engajamento)"
+        )
+
+    employment_signal = stats.get('employment_signal', {}).get('mean')
+    if is_numeric(employment_signal):
+        notes.append(
+            f"Sinal de emprego médio {float(employment_signal):.2f} (0=desempregado, 0.6=informal, 1=formal)"
+        )
+
+    duration_mean = stats.get('program_duration', {}).get('mean')
+    if is_numeric(duration_mean):
+        notes.append(
+            f"Tempo médio no programa de {float(duration_mean):.1f} meses"
+        )
+
+    education_mean = stats.get('education_level', {}).get('mean')
+    if is_numeric(education_mean):
+        notes.append(
+            f"Escolaridade média {float(education_mean):.2f}, acima do grupo de Apoio Intensivo"
+        )
+
+    if not notes:
+        notes.append("Indicadores específicos desse cluster não foram identificados durante o treinamento.")
+
+    return notes
+
+
+def save_training_report(
+    metadata: Dict[str, object],
+    cluster_summaries: List[Dict[str, object]],
+    release_notes: List[str],
+) -> None:
+    """
+    Gera arquivo com resumo do treinamento utilizado em tempo de análise.
+    """
+    report_path = Path("data") / "training_report.md"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+
+    lines = [
+        "=" * 70,
+        "  TRAINING RESULTS ABOVE - USE FOR REFERENCE TO UNDERSTAND THE MODEL",
+        "=" * 70,
+        "",
+        "📊 Resumo:",
+        f"  Registros treinados: {metadata.get('total_records', 'N/D')}",
+        f"  Features utilizadas: {len(metadata.get('feature_names', []))}",
+        f"  Número de clusters: {metadata.get('selected_k', 'N/D')}",
+        f"  Modelo salvo em: {metadata.get('model_path', 'N/D')}",
+        f"  Scaler salvo em: {metadata.get('scaler_path', 'N/D')}",
+        "",
+        "🎯 Perfis descobertos:",
+    ]
+
+    for summary in cluster_summaries:
+        label = summary.get('label', 'Cluster')
+        size_value = summary.get('size')
+        pct_value = summary.get('percentage')
+
+        if is_numeric(size_value):
+            size_text = f"{int(float(size_value))}"
+        else:
+            size_text = "N/D"
+
+        if is_numeric(pct_value):
+            pct_text = f"{float(pct_value):.1f}%"
+        else:
+            pct_text = "N/D"
+
+        lines.append(f"  {label}: {size_text} pessoas ({pct_text})")
+
+    if release_notes:
+        lines.append("")
+        lines.append("📝 Motivos da classificação 'Possível Liberação':")
+        for note in release_notes:
+            lines.append(f"  • {note}")
+
+    lines.append("")
+    lines.append("=" * 70)
+
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+    print(f"✓ Relatório de treinamento salvo em: {report_path}")
+
+
 def main():
     """
     Fluxo principal de treinamento.
@@ -74,6 +185,9 @@ def main():
         
         # Valida colunas (não strict para permitir continuar)
         processor.validate_columns(strict=False)
+        
+        # Valida coluna identificadora
+        processor.validate_identifier_columns()
         
         # Prepara features
         features_df = processor.prepare_features_for_clustering()
@@ -124,6 +238,8 @@ def main():
         
         profiles = engine.analyze_clusters(features_normalized, features_df)
         labels = engine.interpret_clusters(profiles)
+        cluster_summaries: List[Dict[str, object]] = []
+        release_notes: List[str] = []
 
         # Resumo analítico inspirado no fluxo de desempregados
         print("\n🔍 Resumo analítico por cluster:")
@@ -150,6 +266,19 @@ def main():
             print(f"   Dependência química: {format_percentage(substance_mean)}% informaram uso")
             print(f"   Renda média declarada: R$ {income_mean:.2f}")
             print(f"   Tempo médio no programa: {duration_mean:.1f} meses")
+
+            size_value = int(size) if is_numeric(size) else None
+            pct_value = float(pct) if is_numeric(pct) else None
+            cluster_summaries.append(
+                {
+                    "label": labels.get(cluster_id, f"Cluster {cluster_id}"),
+                    "size": size_value,
+                    "percentage": pct_value,
+                }
+            )
+
+            if labels.get(cluster_id) == "Possível Liberação":
+                release_notes = build_release_notes(stats)
         
         # 6. Salva modelo
         print("\n" + "="*70)
@@ -170,59 +299,43 @@ def main():
             "total_records": len(features_df),
             "selected_k": int(best_k),
             "silhouette_score": float(best_score),
-            "feature_names": processor.feature_names
+            "feature_names": processor.feature_names,
+            "model_path": model_output,
+            "scaler_path": scaler_path,
         }
         with open('model/clustering_metadata.json', 'w', encoding='utf-8') as metadata_file:
             json.dump(metadata, metadata_file, ensure_ascii=False, indent=2)
         print("✓ Metadados salvos em: model/clustering_metadata.json")
+
+        print("\n🎯 Perfis descobertos:")
+        for summary in cluster_summaries:
+            label = summary.get("label", "Cluster")
+            size_value = summary.get("size")
+            pct_value = summary.get("percentage")
+            if size_value is None or pct_value is None:
+                print(f"  {label}: dados de tamanho indisponíveis")
+            else:
+                print(f"  {label}: {size_value} pessoas ({pct_value:.1f}%)")
+
+        if release_notes:
+            print("\n📝 Motivos da classificação 'Possível Liberação':")
+            for note in release_notes:
+                print(f"  • {note}")
+
+        save_training_report(metadata, cluster_summaries, release_notes)
+
+        print("\n" + "="*70)
         
         # 7. Resumo final
-        print("\n" + "="*70)
         print("✅ TREINAMENTO CONCLUÍDO COM SUCESSO!")
         print("="*70)
         
-        print(f"\n📊 Resumo:")
+        print(f"\n� Resumo:")
         print(f"  Registros treinados: {len(features_df)}")
         print(f"  Features utilizadas: {len(processor.feature_names)}")
         print(f"  Número de clusters: {engine.n_clusters}")
         print(f"  Modelo salvo em: {model_output}")
         print(f"  Scaler salvo em: {scaler_path}")
-        
-        print(f"\n🎯 Perfis descobertos:")
-        for cluster_id, label in labels.items():
-            profile = profiles[cluster_id]
-            size = profile.get('size', profile.get('tamanho'))
-            percentage = profile.get('percentage', profile.get('percentual'))
-            if size is None or percentage is None:
-                print(f"  {label}: dados de tamanho indisponíveis")
-            else:
-                print(f"  {label}: {size} pessoas ({percentage:.1f}%)")
-
-        liberation_cluster_id = None
-        for cluster_id, label in labels.items():
-            if label == "Possível Liberação":
-                liberation_cluster_id = cluster_id
-                break
-
-        if liberation_cluster_id is not None:
-            liberation_profile = profiles[liberation_cluster_id]
-            stats = liberation_profile.get('characteristics', {})
-
-            income_mean = stats.get('income', {}).get('mean', 0)
-            looking_pct = format_percentage(stats.get('looking_for_job', {}).get('mean', 0))
-            studying_pct = format_percentage(stats.get('studying', {}).get('mean', 0))
-            employment_signal = stats.get('employment_signal', {}).get('mean', 0)
-            duration_mean = stats.get('program_duration', {}).get('mean', 0)
-            education_mean = stats.get('education_level', {}).get('mean', 0)
-
-            print("\n📝 Motivos da classificação 'Possível Liberação':")
-            print(f"  • Renda média declarada de R$ {income_mean:.2f}, indicando alguma ocupação")
-            print(f"  • {looking_pct}% buscando emprego e {studying_pct}% estudando (sinais de engajamento)")
-            print(f"  • Sinal de emprego médio {employment_signal:.2f} (0=desempregado, 0.6=informal, 1=formal)")
-            print(f"  • Tempo médio no programa de {duration_mean:.1f} meses")
-            print(f"  • Escolaridade média {education_mean:.2f}, acima do grupo de Apoio Intensivo")
-
-            print("\n" + "="*70)
 
     except Exception as e:
         print(f"\n❌❌❌ Erro durante treinamento: {str(e)}")

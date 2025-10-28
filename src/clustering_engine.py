@@ -5,7 +5,6 @@ import os
 from typing import Dict, List, Tuple, Optional
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score, davies_bouldin_score
-import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings('ignore')
 

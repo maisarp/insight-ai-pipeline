@@ -150,15 +150,49 @@ def detect_identifier_columns(dataset_path: Path) -> List[str]:
     """Identifica colunas com dados válidos respeitando a ordem de prioridade."""
     try:
         if dataset_path.suffix.lower() == ".csv":
-            dataframe = pd.read_csv(dataset_path, encoding="utf-8-sig")
+            # Tenta diferentes encodings e delimitadores
+            encodings = ['utf-8-sig', 'latin-1', 'iso-8859-1', 'cp1252']
+            delimiters = [',', ';', '\t']
+            dataframe = None
+            
+            for encoding in encodings:
+                for delimiter in delimiters:
+                    try:
+                        dataframe = pd.read_csv(
+                            dataset_path, 
+                            encoding=encoding, 
+                            delimiter=delimiter,
+                            on_bad_lines='skip'  # Pula linhas com problemas
+                        )
+                        if not dataframe.empty and len(dataframe.columns) > 1:
+                            break
+                    except Exception:
+                        continue
+                if dataframe is not None and not dataframe.empty:
+                    break
+            
+            if dataframe is None or dataframe.empty:
+                raise ValueError("Não foi possível ler o arquivo CSV. Verifique se o arquivo está corrompido ou no formato incorreto.")
         else:
-            dataframe = pd.read_excel(dataset_path)
+            # Para Excel, tenta diferentes engines
+            try:
+                dataframe = pd.read_excel(dataset_path, engine='openpyxl')
+            except Exception:
+                dataframe = pd.read_excel(dataset_path)
+                
     except Exception as exc:
         console.print(
-            "\nNão foi possível ler a planilha para identificar colunas. Vamos seguir com o padrão.",
+            "\n⚠ Não foi possível ler a planilha para identificar as colunas.",
             style="warning",
         )
-        console.print(str(exc), style="warning")
+        console.print(
+            f"  Motivo técnico: {str(exc)}",
+            style="info",
+        )
+        console.print(
+            "  Tentaremos continuar usando valores padrão.",
+            style="info",
+        )
         return []
 
     if dataframe.empty:
@@ -184,91 +218,144 @@ def run_console_flow() -> None:
 
     file_service = InputFileService()
     print_usage_overview()
-    console.input("\n[prompt]Pressione Enter quando estiver pronta(o) para escolher o arquivo...")
-    source_path = request_file_path(file_service)
-    prepared_path, converted = file_service.ensure_csv(source_path)
+    
+    # Loop principal para permitir retry
+    while True:
+        try:
+            console.input("\n[prompt]Pressione Enter quando estiver pronta(o) para escolher o arquivo...")
+            source_path = request_file_path(file_service)
+            prepared_path, converted = file_service.ensure_csv(source_path)
 
-    if converted:
-        console.print(
-            "\n✓ Criamos uma cópia em CSV no seu computador para facilitar a análise:",
-            style="success",
-        )
-        console.print(f"  {prepared_path}", style="info")
-    else:
-        console.print(
-            "\nArquivo já está em formato CSV. Vamos seguir para a análise.",
-            style="info",
-        )
+            if converted:
+                console.print(
+                    "\n✓ Criamos uma cópia em CSV no seu computador para facilitar a análise:",
+                    style="success",
+                )
+                console.print(f"  {prepared_path}", style="info")
+            else:
+                console.print(
+                    "\nArquivo já está em formato CSV. Vamos seguir para a análise.",
+                    style="info",
+                )
 
-    console.print(
-        "\nAs próximas informações ajudam apenas na criação do relátorio no seu computador.\n"
-        "Nenhum dado é enviado para outros sistemas. O relatório completo será salvo localmente.\n\n",
-        "==================================================================================\n\n",
-        style="info",
-    )
+            console.print(
+                "\nAs próximas informações ajudam apenas na criação do relátorio no seu computador.\n"
+                "Nenhum dado é enviado para outros sistemas. O relatório completo será salvo localmente.\n\n",
+                "==================================================================================\n\n",
+                style="info",
+            )
 
-    identifier_columns = detect_identifier_columns(prepared_path)
-    if identifier_columns:
-        console.print(
-            f"Coluna(s) identificadora(s) detectada(s): {', '.join(identifier_columns)}",
-            style="highlight",
-        )
-    else:
-        console.print(
-            "\nNão encontramos dados identificadores confiáveis. Tentaremos usar ID_Atendido como padrão.",
-            style="warning",
-        )
-        identifier_columns = [IDENTIFIER_PRIORITY[0]]
+            identifier_columns = detect_identifier_columns(prepared_path)
+            if identifier_columns:
+                console.print(
+                    f"✓ Coluna(s) identificadora(s) detectada(s): {', '.join(identifier_columns)}",
+                    style="highlight",
+                )
+            else:
+                console.print(
+                    "\n⚠ Não encontramos colunas identificadoras confiáveis (ID_Atendido, Nome, CPF, etc.).",
+                    style="warning",
+                )
+                console.print(
+                    "  Tentaremos usar 'ID_Atendido' como padrão nos relatórios.",
+                    style="info",
+                )
+                identifier_columns = [IDENTIFIER_PRIORITY[0]]
 
-    predictor = PredictorClustering(
-        str(MODEL_PATH),
-        str(SCALER_PATH),
-        identifier_columns,
-        verbose=False, #IMPORTANTE LEMBRAR: MANTER DESATIVADO PARA CRIAR O .EXE
-    )
+            predictor = PredictorClustering(
+                str(MODEL_PATH),
+                str(SCALER_PATH),
+                identifier_columns,
+                verbose=False, #IMPORTANTE LEMBRAR: MANTER DESATIVADO PARA CRIAR O .EXE
+            )
 
-    with console.status("[info]Estamos preparando os dados para análise..."):
-        predictor.load_and_process_data(str(prepared_path))
+            with console.status("[info]Estamos preparando os dados para análise..."):
+                predictor.load_and_process_data(str(prepared_path))
 
-    with console.status("[info]Estamos gerando as classificações individuais..."):
-        predictor.predict()
+            with console.status("[info]Estamos gerando as classificações individuais..."):
+                predictor.predict()
 
-    console.print(
-        "\n✓ Análise concluída. Vamos revisar os pontos principais:",
-        style="success",
-    )
+            console.print(
+                "\n✓ Análise concluída. Vamos revisar os pontos principais:",
+                style="success",
+            )
 
-    insight_service = ClusterInsightService(TRAINING_REPORT_PATH)
-    user_output_dir = prepared_path.parent / "IA_insights_arquivos"
-    report_builder = ClusterReportBuilder(insight_service, user_output_dir)
+            insight_service = ClusterInsightService(TRAINING_REPORT_PATH)
+            user_output_dir = prepared_path.parent / "IA_insights_arquivos"
+            report_builder = ClusterReportBuilder(insight_service, user_output_dir)
 
-    report_builder.print_overview(predictor)
-    stats = predictor.get_summary_stats()
-    report_builder.show_cluster_insights(stats["clusters"].keys())
+            report_builder.print_overview(predictor)
+            stats = predictor.get_summary_stats()
+            report_builder.show_cluster_insights(stats["clusters"].keys())
 
-    fallback_identifiers = identifier_columns or IDENTIFIER_PRIORITY
-    report_builder.print_individual_overview(predictor, fallback_identifiers)
+            fallback_identifiers = identifier_columns or IDENTIFIER_PRIORITY
+            report_builder.print_individual_overview(predictor, fallback_identifiers)
 
-    saved_files = report_builder.save_outputs(predictor)
-    console.print("Relatórios gerados no seu computador:", style="title")
-    for generated in saved_files:
-        console.print(f"- {generated.resolve()}", style="info")
+            saved_files = report_builder.save_outputs(predictor)
+            console.print("\n✓ Relatórios gerados no seu computador:", style="title")
+            for generated in saved_files:
+                console.print(f"  • {generated.name}", style="info")
 
-    console.print(
-        f"\nVocê encontra todos os arquivos gerados na pasta: {user_output_dir.resolve()}",
-        style="title",
-    )
+            console.print(
+                f"\n📁 Localização: {user_output_dir.resolve()}",
+                style="title",
+            )
+            
+            # Pergunta se deseja abrir a pasta
+            open_folder = console.input(
+                "\n[prompt]Deseja abrir a pasta dos relatórios agora? (S/N): "
+            ).strip().upper()
+            
+            if open_folder in ['S', 'SIM', 'Y', 'YES', '']:
+                try:
+                    import subprocess
+                    import platform
+                    
+                    if platform.system() == 'Windows':
+                        subprocess.run(['explorer', str(user_output_dir.resolve())])
+                    elif platform.system() == 'Darwin':  # macOS
+                        subprocess.run(['open', str(user_output_dir.resolve())])
+                    else:  # Linux
+                        subprocess.run(['xdg-open', str(user_output_dir.resolve())])
+                    
+                    console.print("\n✓ Pasta aberta!", style="success")
+                except Exception as e:
+                    console.print(
+                        f"\n⚠ Não foi possível abrir a pasta automaticamente: {str(e)}",
+                        style="warning"
+                    )
+                    console.print(
+                        f"  Você pode abrir manualmente navegando até: {user_output_dir.resolve()}",
+                        style="info"
+                    )
 
-    if converted and prepared_path.exists():
-        console.print(
-            "\nO CSV convertido permanece disponível caso queira reutilizá-lo.",
-            style="info",
-        )
+            if converted and prepared_path.exists():
+                console.print(
+                    "\nℹ O CSV convertido permanece disponível caso queira reutilizá-lo.",
+                    style="info",
+                )
 
-    console.print(
-        "\nProcesso concluído com sucesso. Obrigado por utilizar o sistema!\n",
-        style="success",
-    )
+            console.print(
+                "\nProcesso concluído com sucesso. Obrigado por utilizar o sistema!\n",
+                style="success",
+            )
+            
+            # Sucesso - sair do loop
+            break
+            
+        except Exception as exc:
+            console.print("\n" + "="*80, style="error")
+            console.print("❌ ERRO DURANTE O PROCESSAMENTO DO ARQUIVO", style="error")
+            console.print("="*80 + "\n", style="error")
+            console.print(str(exc), style="info")
+            
+            retry = console.input(
+                "\n[prompt]Deseja tentar novamente com outro arquivo? (S/N): "
+            ).strip().upper()
+            
+            if retry not in ['S', 'SIM', 'Y', 'YES']:
+                console.print("\nOperação cancelada pelo usuário.", style="info")
+                raise  # Re-lança a exceção para ser tratada no main()
 
 
 def main() -> None:
